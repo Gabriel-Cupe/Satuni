@@ -123,7 +123,7 @@ async function recargarPagina(page) {
 async function runAutomationForUser(userData) {
     let browser = null;
     let page = null;
-    const maxIntentos = 5; // Reducir intentos en entorno cloud
+    const maxIntentos = 5;
     let intentos = 0;
     let exito = false;
     let resultadoFinal = null;
@@ -131,40 +131,29 @@ async function runAutomationForUser(userData) {
     try {
         console.log(`🚀 Iniciando navegador para: ${userData.name}`);
         
-        // Conectar a Browserless o Chrome local
         browser = await getBrowser();
         page = await browser.newPage();
         
-        // Configurar tiempo de espera
         page.setDefaultNavigationTimeout(60000);
         page.setDefaultTimeout(30000);
         
-        // Navegar al sitio
         console.log(`⏳ Navegando a arruni.org para: ${userData.name}`);
         await page.goto('https://arruni.org', { waitUntil: 'networkidle2' });
 
         while (intentos < maxIntentos && !exito) {
             intentos++;
             console.log(`\n🎯 INTENTO ${intentos} de ${maxIntentos} para: ${userData.name}`);
-            console.log("=".repeat(50));
             
             try {
-                // Esperar a que el formulario cargue
-                console.log(`⏳ Esperando formulario para: ${userData.name}`);
                 await page.waitForSelector('#name', { timeout: 30000 });
                 
-                // Llenar formulario
-                console.log(`📝 Llenando formulario para: ${userData.name}`);
                 await page.type('#name', userData.name);
                 await page.type('#last_name', userData.last_name);
                 await page.type('#code', userData.code);
                 await page.type('#phone', userData.phone);
                 
-                // Seleccionar facultad
                 await page.select('#faculty', userData.faculty);
                 
-                // Esperar opciones de ruta
-                console.log(`⏳ Esperando rutas para: ${userData.name}`);
                 try {
                     await page.waitForSelector('.route-option', { timeout: 10000 });
                 } catch (error) {
@@ -173,8 +162,6 @@ async function runAutomationForUser(userData) {
                     continue;
                 }
                 
-                // Buscar y seleccionar ruta especificada
-                console.log(`🔍 Buscando ruta ${userData.route} para: ${userData.name}`);
                 const routeOptions = await page.$$('.route-option');
                 
                 let rutaEncontrada = false;
@@ -214,8 +201,6 @@ async function runAutomationForUser(userData) {
                     continue;
                 }
                 
-                // Hacer clic en Registrar
-                console.log(`🖱️ Haciendo clic en Registrar para: ${userData.name}`);
                 let clicExitoso = false;
                 
                 try {
@@ -224,7 +209,6 @@ async function runAutomationForUser(userData) {
                         await submitButton.click();
                         clicExitoso = true;
                     } else {
-                        // Intentar otros selectores
                         const buttons = await page.$$('button');
                         for (const button of buttons) {
                             const buttonText = await page.evaluate(el => el.textContent, button);
@@ -247,10 +231,6 @@ async function runAutomationForUser(userData) {
                     continue;
                 }
                 
-                // Esperar y verificar resultado
-                console.log(`⏳ Esperando confirmación para: ${userData.name}`);
-                
-                // Esperar a que aparezca algún resultado
                 try {
                     await page.waitForSelector('.fixed.inset-0, .bg-red-50, .bg-green-50', { timeout: 10000 });
                 } catch (error) {
@@ -259,12 +239,10 @@ async function runAutomationForUser(userData) {
                     continue;
                 }
                 
-                // Verificar si fue exitoso (ticket de reserva)
                 const ticketElement = await page.$('.fixed.inset-0');
                 if (ticketElement) {
                     console.log(`🎉 Ticket de reserva detectado para: ${userData.name}`);
                     
-                    // Obtener número de ticket
                     let ticketNumber = "No encontrado";
                     try {
                         const ticketNumberElement = await page.$('.ticket-number');
@@ -284,7 +262,6 @@ async function runAutomationForUser(userData) {
                     break;
                 }
                 
-                // Verificar si hay error de ruta no seleccionada
                 const errorElement = await page.$('.bg-red-50');
                 if (errorElement) {
                     const errorText = await page.evaluate(el => el.textContent, errorElement);
@@ -297,7 +274,6 @@ async function runAutomationForUser(userData) {
                     }
                 }
                 
-                // Si no se detectó ninguno de los elementos esperados, recargar
                 console.log("❌ No se detectó resultado claro, recargando...");
                 await recargarPagina(page);
                 
@@ -315,7 +291,6 @@ async function runAutomationForUser(userData) {
             intentos: intentos
         };
     } finally {
-        // Cerrar la página y desconectar
         if (page) await page.close();
         if (browser) {
             if (process.env.NODE_ENV === 'production') {
@@ -340,7 +315,6 @@ async function runAutomationForUser(userData) {
 
 // Función para ejecutar automatización en paralelo
 async function runAutomationInParallel(users) {
-    // Limitar a 2 ejecuciones en paralelo en producción
     const maxParallel = process.env.NODE_ENV === 'production' ? 2 : users.length;
     const results = [];
     
@@ -350,7 +324,6 @@ async function runAutomationInParallel(users) {
         const chunkResults = await Promise.all(promises);
         results.push(...chunkResults);
         
-        // Pequeña pausa entre chunks
         if (i + maxParallel < users.length) {
             await new Promise(resolve => setTimeout(resolve, 2000));
         }
@@ -359,7 +332,7 @@ async function runAutomationInParallel(users) {
     return results;
 }
 
-// Rutas de la API
+// ================== RUTAS DE LA API ==================
 
 // Verificar contraseña
 app.post('/api/verify-password', (req, res) => {
@@ -392,7 +365,6 @@ app.post('/api/users', async (req, res) => {
         const newUser = req.body;
         const users = await loadUsers();
         
-        // Verificar si el usuario ya existe
         if (users.some(user => user.code === newUser.code)) {
             return res.status(400).json({ success: false, message: 'El usuario ya existe' });
         }
@@ -461,16 +433,27 @@ app.post('/api/run-all-automation', async (req, res) => {
     }
 });
 
-// Ruta principal - servir el HTML
+// ================== RUTAS PRINCIPALES ==================
+
+// Ruta principal
 app.get('/', (req, res) => {
     res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
 
-// Manejo de rutas para SPA en producción
+// Servir archivos estáticos
+app.use(express.static('public'));
+
+// Manejo de rutas para SPA - DEBE IR AL FINAL
 app.get('*', (req, res) => {
+    // Excluir rutas de API y archivos con extensiones
+    if (req.path.startsWith('/api/') || /\.[a-zA-Z0-9]+$/.test(req.path)) {
+        return res.status(404).json({ error: 'Not found' });
+    }
+    
     res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
 
+// Iniciar servidor
 app.listen(port, () => {
     console.log(`🚀 Servidor ejecutándose en http://localhost:${port}`);
     console.log(`Modo: ${process.env.NODE_ENV || 'development'}`);

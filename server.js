@@ -1,18 +1,18 @@
 const express = require('express');
-const puppeteer = require('puppeteer');
+const puppeteer = require('puppeteer-core');
 const path = require('path');
 const { createClient } = require('@supabase/supabase-js');
+const compression = require('compression');
 const app = express();
-const port = 3000;
+const port = process.env.PORT || 3000;
 
 // Middleware
+app.use(compression());
 app.use(express.json());
 app.use(express.static('public'));
 
-// Contraseña para autenticación
+// Configuración
 const PASSWORD = "123Jandy!";
-
-// Configuración de Supabase
 const SUPABASE_URL = "https://appfjlajubbjqlfkhywx.supabase.co";
 const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImFwcGZqbGFqdWJianFsZmtoeXd4Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTY2NTIzMTgsImV4cCI6MjA3MjIyODMxOH0.eqzN8_4U5yz3nTi4sbS_3qDE_79-FLXNA1I8Oyue_SE";
 
@@ -81,6 +81,30 @@ async function deleteUser(code) {
     }
 }
 
+// Función para conectar con Browserless o Chrome local
+async function getBrowser() {
+  try {
+    // Para producción, usar Browserless
+    if (process.env.NODE_ENV === 'production') {
+      const browserWSEndpoint = `wss://chrome.browserless.io?token=${process.env.BROWSERLESS_TOKEN}`;
+      console.log('Conectando a Browserless:', browserWSEndpoint);
+      return await puppeteer.connect({
+        browserWSEndpoint,
+        defaultViewport: { width: 1280, height: 720 }
+      });
+    } else {
+      // Para desarrollo local
+      return await puppeteer.launch({
+        headless: false,
+        args: ['--start-maximized', '--disable-blink-features=AutomationControlled']
+      });
+    }
+  } catch (error) {
+    console.error('Error connecting to browser:', error);
+    throw error;
+  }
+}
+
 // Función para recargar la página
 async function recargarPagina(page) {
     console.log("🔄 Recargando página...");
@@ -95,23 +119,25 @@ async function recargarPagina(page) {
     }
 }
 
-// Función principal de automatización para un usuario CON REINTENTOS
+// Función principal de automatización para un usuario
 async function runAutomationForUser(userData) {
     let browser = null;
     let page = null;
-    const maxIntentos = 10;
+    const maxIntentos = 5; // Reducir intentos en entorno cloud
     let intentos = 0;
     let exito = false;
     let resultadoFinal = null;
 
     try {
         console.log(`🚀 Iniciando navegador para: ${userData.name}`);
-        browser = await puppeteer.launch({
-            headless: false,
-            args: ['--start-maximized', '--disable-blink-features=AutomationControlled']
-        });
-
+        
+        // Conectar a Browserless o Chrome local
+        browser = await getBrowser();
         page = await browser.newPage();
+        
+        // Configurar tiempo de espera
+        page.setDefaultNavigationTimeout(60000);
+        page.setDefaultTimeout(30000);
         
         // Navegar al sitio
         console.log(`⏳ Navegando a arruni.org para: ${userData.name}`);
@@ -283,16 +309,24 @@ async function runAutomationForUser(userData) {
         
     } catch (error) {
         console.error(`💥 Error general para ${userData.name}:`, error);
+        resultadoFinal = { 
+            success: false, 
+            message: `Error: ${error.message}`,
+            intentos: intentos
+        };
     } finally {
-        // Esperar 5 segundos antes de cerrar el navegador
+        // Cerrar la página y desconectar
+        if (page) await page.close();
         if (browser) {
-            console.log(`⏳ Esperando 5 segundos antes de cerrar...`);
-            await new Promise(resolve => setTimeout(resolve, 5000));
-            await browser.close();
+            if (process.env.NODE_ENV === 'production') {
+                await browser.disconnect();
+            } else {
+                await browser.close();
+            }
         }
     }
     
-    if (!exito) {
+    if (!exito && !resultadoFinal) {
         console.log(`❌ Se agotaron los ${maxIntentos} intentos para: ${userData.name}`);
         resultadoFinal = { 
             success: false, 
@@ -306,8 +340,23 @@ async function runAutomationForUser(userData) {
 
 // Función para ejecutar automatización en paralelo
 async function runAutomationInParallel(users) {
-    const promises = users.map(user => runAutomationForUser(user));
-    return Promise.all(promises);
+    // Limitar a 2 ejecuciones en paralelo en producción
+    const maxParallel = process.env.NODE_ENV === 'production' ? 2 : users.length;
+    const results = [];
+    
+    for (let i = 0; i < users.length; i += maxParallel) {
+        const chunk = users.slice(i, i + maxParallel);
+        const promises = chunk.map(user => runAutomationForUser(user));
+        const chunkResults = await Promise.all(promises);
+        results.push(...chunkResults);
+        
+        // Pequeña pausa entre chunks
+        if (i + maxParallel < users.length) {
+            await new Promise(resolve => setTimeout(resolve, 2000));
+        }
+    }
+    
+    return results;
 }
 
 // Rutas de la API
@@ -393,7 +442,7 @@ app.post('/api/run-automation', async (req, res) => {
 app.post('/api/run-all-automation', async (req, res) => {
     try {
         const users = await loadUsers();
-        console.log(`📨 Procesando ${users.length} usuarios en paralelo`);
+        console.log(`📨 Procesando ${users.length} usuarios`);
         
         const results = await runAutomationInParallel(users);
         
@@ -417,6 +466,12 @@ app.get('/', (req, res) => {
     res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
 
+// Manejo de rutas para SPA en producción
+app.get('*', (req, res) => {
+    res.sendFile(path.join(__dirname, 'public', 'index.html'));
+});
+
 app.listen(port, () => {
     console.log(`🚀 Servidor ejecutándose en http://localhost:${port}`);
+    console.log(`Modo: ${process.env.NODE_ENV || 'development'}`);
 });

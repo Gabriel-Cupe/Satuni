@@ -1,18 +1,24 @@
 {
-  "name": "automatizador-reservas",
+  "name": "reservation-automation",
   "version": "1.0.0",
-  "description": "Sistema de automatización de reservas para Arruni",
+  "description": "Sistema de automatización de reservas",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
-    "dev": "nodemon server.js"
+    "dev": "NODE_ENV=development nodemon server.js",
+    "vercel-build": "npm install && echo 'Build completo'"
   },
   "dependencies": {
-    "@supabase/supabase-js": "^2.56.1",
     "express": "^5.1.0",
-    "puppeteer": "^24.17.0"
+    "puppeteer-core": "^24.17.0",
+    "@supabase/supabase-js": "^2.53.0",
+    "compression": "^1.8.0"
   },
   "devDependencies": {
-    "nodemon": "^3.0.1"
+    "nodemon": "^3.0.1",
+    "puppeteer": "^24.17.0"
+  },
+  "engines": {
+    "node": ">=18.x"
   }
 }

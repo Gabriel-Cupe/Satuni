@@ -1,0 +1,17 @@
+{
+  "name": "automatizador-reservas",
+  "version": "1.0.0",
+  "description": "Sistema de automatización de reservas para Arruni",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "nodemon server.js"
+  },
+  "dependencies": {
+    "express": "^5.1.0",
+    "puppeteer": "^24.17.0"
+  },
+  "devDependencies": {
+    "nodemon": "^3.0.1"
+  }
+}

@@ -1,7 +1,7 @@
 const express = require('express');
 const puppeteer = require('puppeteer');
 const path = require('path');
-const fs = require('fs');
+const { createClient } = require('@supabase/supabase-js');
 const app = express();
 const port = 3000;
 
@@ -12,31 +12,71 @@ app.use(express.static('public'));
 // Contraseña para autenticación
 const PASSWORD = "123Jandy!";
 
-// Archivo para almacenar usuarios
-const USERS_FILE = 'users.json';
+// Configuración de Supabase
+const SUPABASE_URL = "https://appfjlajubbjqlfkhywx.supabase.co";
+const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImFwcGZqbGFqdWJianFsZmtoeXd4Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTY2NTIzMTgsImV4cCI6MjA3MjIyODMxOH0.eqzN8_4U5yz3nTi4sbS_3qDE_79-FLXNA1I8Oyue_SE";
+
+// Inicializar cliente de Supabase
+const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
 // Rutas disponibles
 const AVAILABLE_ROUTES = ['Ate', 'Norte', 'Puente Piedra', 'Sur'];
 
-// Cargar usuarios desde archivo
-function loadUsers() {
+// Cargar usuarios desde Supabase
+async function loadUsers() {
     try {
-        if (fs.existsSync(USERS_FILE)) {
-            return JSON.parse(fs.readFileSync(USERS_FILE, 'utf8'));
+        const { data, error } = await supabase
+            .from('users')
+            .select('*');
+            
+        if (error) {
+            console.error("Error loading users from Supabase:", error);
+            return [];
         }
+        
+        return data || [];
     } catch (error) {
-        console.error("Error loading users:", error);
+        console.error("Exception loading users:", error);
+        return [];
     }
-    return [];
 }
 
-// Guardar usuarios en archivo
-function saveUsers(users) {
+// Guardar usuario en Supabase
+async function saveUser(user) {
     try {
-        fs.writeFileSync(USERS_FILE, JSON.stringify(users, null, 2));
+        const { data, error } = await supabase
+            .from('users')
+            .insert([user])
+            .select();
+            
+        if (error) {
+            console.error("Error saving user to Supabase:", error);
+            return false;
+        }
+        
+        return data && data.length > 0;
+    } catch (error) {
+        console.error("Exception saving user:", error);
+        return false;
+    }
+}
+
+// Eliminar usuario de Supabase
+async function deleteUser(code) {
+    try {
+        const { error } = await supabase
+            .from('users')
+            .delete()
+            .eq('code', code);
+            
+        if (error) {
+            console.error("Error deleting user from Supabase:", error);
+            return false;
+        }
+        
         return true;
     } catch (error) {
-        console.error("Error saving users:", error);
+        console.error("Exception deleting user:", error);
         return false;
     }
 }
@@ -55,7 +95,6 @@ async function recargarPagina(page) {
     }
 }
 
-// Función principal de automatización para un usuario CON REINTENTOS
 // Función principal de automatización para un usuario CON REINTENTOS
 async function runAutomationForUser(userData) {
     let browser = null;
@@ -271,8 +310,7 @@ async function runAutomationInParallel(users) {
     return Promise.all(promises);
 }
 
-// Rutas de la API (se mantienen igual que antes)
-// ... (el resto del código de rutas API se mantiene igual)
+// Rutas de la API
 
 // Verificar contraseña
 app.post('/api/verify-password', (req, res) => {
@@ -285,9 +323,13 @@ app.post('/api/verify-password', (req, res) => {
 });
 
 // Obtener usuarios
-app.get('/api/users', (req, res) => {
-    const users = loadUsers();
-    res.json(users);
+app.get('/api/users', async (req, res) => {
+    try {
+        const users = await loadUsers();
+        res.json(users);
+    } catch (error) {
+        res.status(500).json({ success: false, message: 'Error al cargar usuarios' });
+    }
 });
 
 // Obtener rutas disponibles
@@ -296,35 +338,38 @@ app.get('/api/routes', (req, res) => {
 });
 
 // Agregar usuario
-app.post('/api/users', (req, res) => {
-    const newUser = req.body;
-    const users = loadUsers();
-    
-    // Verificar si el usuario ya existe
-    if (users.some(user => user.code === newUser.code)) {
-        return res.status(400).json({ success: false, message: 'El usuario ya existe' });
-    }
-    
-    users.push(newUser);
-    if (saveUsers(users)) {
-        res.json({ success: true, user: newUser });
-    } else {
-        res.status(500).json({ success: false, message: 'Error al guardar usuario' });
+app.post('/api/users', async (req, res) => {
+    try {
+        const newUser = req.body;
+        const users = await loadUsers();
+        
+        // Verificar si el usuario ya existe
+        if (users.some(user => user.code === newUser.code)) {
+            return res.status(400).json({ success: false, message: 'El usuario ya existe' });
+        }
+        
+        if (await saveUser(newUser)) {
+            res.json({ success: true, user: newUser });
+        } else {
+            res.status(500).json({ success: false, message: 'Error al guardar usuario' });
+        }
+    } catch (error) {
+        res.status(500).json({ success: false, message: 'Error interno del servidor' });
     }
 });
 
 // Eliminar usuario
-app.delete('/api/users/:code', (req, res) => {
-    const userCode = req.params.code;
-    let users = loadUsers();
-    
-    const initialLength = users.length;
-    users = users.filter(user => user.code !== userCode);
-    
-    if (users.length < initialLength && saveUsers(users)) {
-        res.json({ success: true });
-    } else {
-        res.status(404).json({ success: false, message: 'Usuario no encontrado' });
+app.delete('/api/users/:code', async (req, res) => {
+    try {
+        const userCode = req.params.code;
+        
+        if (await deleteUser(userCode)) {
+            res.json({ success: true });
+        } else {
+            res.status(404).json({ success: false, message: 'Usuario no encontrado' });
+        }
+    } catch (error) {
+        res.status(500).json({ success: false, message: 'Error interno del servidor' });
     }
 });
 
@@ -347,7 +392,7 @@ app.post('/api/run-automation', async (req, res) => {
 // Ejecutar automatización para todos los usuarios
 app.post('/api/run-all-automation', async (req, res) => {
     try {
-        const users = loadUsers();
+        const users = await loadUsers();
         console.log(`📨 Procesando ${users.length} usuarios en paralelo`);
         
         const results = await runAutomationInParallel(users);
